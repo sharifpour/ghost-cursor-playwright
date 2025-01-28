@@ -1,4 +1,4 @@
-import playwright from 'playwright-core';
+import playwright, { ElementHandle } from 'playwright-core';
 import { Vector, direction, magnitude, overshoot, path, BoundingBox } from './math';
 import installMouseHelper from './mouse-helper';
 import { sleep, randomValue } from './utils';
@@ -64,7 +64,7 @@ export interface Actions {
 }
 
 export type clickOptions = {
-  target?: string | BoundingBox | Vector;
+  target?: string | BoundingBox | Vector | ElementHandle;
   waitBeforeClick?: [number, number];
   waitBetweenClick?: [number, number];
   doubleClick?: boolean;
@@ -123,9 +123,10 @@ export class Cursor {
     return magnitude(direction(a, b)) > this.overshootThreshold;
   }
 
-  async getElemBoundingBox(selector: string): Promise<BoundingBox> {
+  async getElemBoundingBox(selector: string|ElementHandle): Promise<BoundingBox> {
     let viewPortBox: BoundingBox;
-    let elemBoundingBox = await (await this.page.locator(selector)).boundingBox();
+    let elemBoundingBox = typeof selector === 'string'? await (await this.page.locator(selector)).boundingBox()
+    : await selector.boundingBox();
     if (elemBoundingBox === null) throw new Error(`Selector ${selector} is not present in DOM`);
 
     let { y: elemY, x: elemX, height: elemHeight, width: elemWidth } = elemBoundingBox;
@@ -136,7 +137,8 @@ export class Cursor {
       vwWidth = 1;
     // scroll until elem is visible
     while (totalElemHeight > vwHeight || totalElemWidth > vwWidth || elemY < 0 || elemX < 0) {
-      elemBoundingBox = await (await this.page.locator(selector)).boundingBox();
+      let elemBoundingBox = typeof selector === 'string'? await (await this.page.locator(selector)).boundingBox()
+      : await selector.boundingBox();
       if (elemBoundingBox === null) throw new Error(`Selector ${selector} is not present in DOM`);
 
       elemY = elemBoundingBox.y;
@@ -334,7 +336,7 @@ export class Cursor {
       }
     },
 
-    move: async (target, moveOptions: moveOptions): Promise<void> => {
+    move: async (target: string|Vector|BoundingBox|ElementHandle, moveOptions: moveOptions): Promise<void> => {
       // defaults
       let paddingPercentage = 0,
         waitForSelector = 30_000,
@@ -352,7 +354,7 @@ export class Cursor {
         const destination = target as Vector;
         await this.tracePath(path(this.previous, destination));
         this.previous = destination;
-      } else {
+      } else  {
         let elemBox: BoundingBox;
         if (typeof target === 'string') {
           try {
@@ -361,8 +363,10 @@ export class Cursor {
             throw new Error(`Selector ${target} is not present in DOM`);
           }
           elemBox = await this.getElemBoundingBox(target);
-        } else {
+        } else if(instanceOfBoundingBox(target)) {
           elemBox = target as BoundingBox;
+        } else {
+          elemBox = await this.getElemBoundingBox(target as ElementHandle);
         }
 
         const { height, width } = elemBox;
@@ -402,3 +406,15 @@ function instanceOfVector(object: any): boolean {
   if (typeof object === 'string') return false;
   return 'x' in object && 'y' in object && Object.keys(object).length === 2 ? true : false;
 }
+
+function instanceOfBoundingBox(obj: unknown): obj is BoundingBox {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as BoundingBox).x === 'number' &&
+    typeof (obj as BoundingBox).y === 'number' &&
+    typeof (obj as BoundingBox).width === 'number' &&
+    typeof (obj as BoundingBox).height === 'number'
+  );
+}
+
